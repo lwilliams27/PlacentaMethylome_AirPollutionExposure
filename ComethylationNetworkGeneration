@@ -1,0 +1,130 @@
+#Comethylation Network Analysis via Comethyl#
+
+#Load libraries
+library(tidyverse)
+library(comethyl)
+library(Biobase)
+library(dplyr)
+library(sva)
+library(openxlsx)
+
+#Set global options#
+options(stringsAsFactors = FALSE)
+Sys.setenv(R_THREADS = 1)
+WGCNA::disableWGCNAThreads()
+
+#Read CpG Reports#
+colData <- openxlsx::read.xlsx("sample_info.xlsx", rowNames = TRUE)
+bs <- getCpGs(colData, file = "Unfiltered_BSseq.rds")
+
+#Examine CpG Totals at Different Cutoffs#
+CpGtotals <- getCpGtotals(bs, file = "CpG_Totals.txt")
+plotCpGtotals(CpGtotals, file = "CpG_Totals.pdf")
+
+#Filter BS Object#
+bs <- filterCpGs(bs, cov = 3, perSample = 0.75, file = "Filtered_BSseq.rds")
+
+#Call Regions and Examin them at Different Cutoffs#
+regions <- getRegions(bs, file = "Unfiltered_Regions.txt")
+plotRegionStats(regions, maxQuantile = 0.99, file = "Unfiltered_Region_Plots.pdf")
+plotSDstats(regions, maxQuantile = 0.99, file = "Unfiltered_SD_Plots.pdf")
+regionTotals <- getRegionTotals(regions, file = "Region_Totals.txt")
+plotRegionTotals(regionTotals, file = "Region_Totals.pdf")
+
+#Filter Regions#
+regions <- filterRegions(regions, covMin = 14, methSD = 0.05,file = "Filtered_Regions.txt")
+plotRegionStats(regions, maxQuantile = 0.99, file = "Filtered_Region_Plots.pdf")
+plotSDstats(regions, maxQuantile = 0.99, file = "Filtered_SD_Plots.pdf")
+
+#Get Methylation Data
+meth <- getRegionMeth(regions, bs = bs, file = "Region_Methylation.rds")
+
+#PCA and Adjustment of Filtered Region Methylation
+trait_data <- read.xlsx("sample_info.xlsx", rowNames=T)
+all_vars <- colnames(trait_data)
+nd_traits <- c("Diagnosis_ASD", "ADOS_CS", "MSLelcStandard", "CBCL")
+exposure_traits <- c("PM25", "NonWF", "WF", "PregFire_Any")
+
+excluded_vars <- unlist(lapply(c(nd_traits, exposure_traits), function(p) { grep(p, all_vars, value = TRUE) }))
+excluded_vars <- unique(excluded_vars)
+print(paste("Here are the excluded vars", excluded_vars))
+
+model_formula <- paste("~", paste(excluded_vars, collapse = "+"))
+if (length(excluded_vars) == 0) { model_formula <- "~ 1" }
+print("Making the model")
+
+options(na.action = "na.pass") 
+mod <- model.matrix(as.formula(model_formula), data = trait_data)
+
+#Get PCs function#
+getPCs <- function(meth, mod = matrix(1, nrow = ncol(meth), ncol = 1),
+                   save = TRUE,
+                   file = "Top_Principal_Components.rds",
+                   verbose = TRUE){
+  if(verbose){
+    message("[getPCs] Determining number of top principal components")
+  }
+  #altered below -- setting NAs to 0 after centering
+  mod_noNA <- mod
+  if(anyNA(mod_noNA)){
+    if(verbose) message("[getPCs] NAs detected in mod, centering and replacing with 0")
+    mod_noNA[,-1] <- scale(mod_noNA[,-1], center = TRUE, scale = TRUE) #Scale everything other than the intercept (column 1)
+    mod_noNA[is.na(mod_noNA)] <- 0
+  }
+  #end alteration
+  
+  n.pc <- num.sv(meth, mod = mod_noNA, method = "be", seed = 5)
+  if(verbose){
+    message("[getPCs] Calculating top ", n.pc,
+            " principal components")
+  }
+  meth_t <- t(meth)
+  meth_t_centered <- scale(meth_t, center = TRUE, scale = FALSE)
+  ss <- svd(meth_t_centered)
+  PCs <- ss$u[, 1:n.pc]
+  dimnames(PCs) <- list(dimnames(meth_t)[[1]], paste0("PC_", 1:n.pc))
+  if(save){
+    if(verbose){
+      message("[getPCs] Saving file as ", file)
+    }
+    saveRDS(PCs, file = file)
+  }
+  return(PCs)
+}
+
+#Run getPCs function#
+PCs <- getPCs(meth, verbose = TRUE, file = "Top_Principal_Components.rds")
+
+#PC-Trait Correlation Visualization#
+PCtraitCor <- getMEtraitCor(PCs, colData = trait_data, corType = "pearson",
+                            file = "PC_Trait_Correlation_Stats_update.txt")
+PCtraitCorBicor <- getMEtraitCor(PCs, trait_data, corType = "bicor",
+                                 file = "PC_Trait_Correlation_Stats_BicorUpdated.txt")
+PCdendro <- getDendro(PCs, distance = "pearson")
+PCtraitDendro <- getCor(PCs, y = trait_data, corType = "pearson", robustY = TRUE) %>%
+  getDendro(transpose = T)
+plotMEtraitCor(PCtraitCor, moduleOrder = PCdendro$order,
+               traitOrder = PCtraitDendro$order,
+               file = "PC_Trait_Correlation_Heatmap_Expanded.pdf",
+               height = 16,
+               width = 16)
+
+#Adjust Methylation for PCs#
+methAdj <- adjustRegionMeth(meth, PCs = PCs, file = "Adjusted_Region_Methylation.rds")
+getDendro(methAdj, distance = "euclidean") %>%
+  plotDendro(file = "Sample_Dendrogram.pdf", expandY = c(0.25,0.08))
+
+#Soft Power Adjustment - Pearson and Bicor#
+#Pearson#
+WGCNA::enableWGCNAThreads(nThreads = 10)
+#Soft Power Threshold
+sft <- getSoftPower(methAdj, corType = "pearson", file = "Soft_Power_Pearson.rds", blockSize = 5000)
+plotSoftPower(sft, file = "Soft_Power_Pearson_Plots.pdf")
+#Bicor
+sft_bicor <- getSoftPower(methAdj, corType = "bicor", file = "Soft_Power_Bicor.rds", blockSize = 5000)
+plotSoftPower(sft_bicor, file = "Soft_Power_Bicor_Plots.pdf")
+
+#Generate comethylation network modules from adjusted region methylation using pearson soft power#
+modules <- getModules(methAdj, power = sft$powerEstimate, regions = regions, corType = "pearson", file = "Modules.rds", nThreads = 50)
+plotRegionDendro(modules, file = "Region_Dendrograms.pdf")
+BED <- getModuleBED(modules$regions, file = "Modules.bed")
