@@ -1,0 +1,185 @@
+#Gene List Overlap Analyses#
+
+#DMR Gene List Overlaps and Plotting#
+#Males vs. Females#
+library(GeneOverlap)
+MaleBackground <- read.xlsx("Males_05Cutoff_PregFireAny_AdjGASeqGroup/Extra/bsseq_background_annotated.xlsx")
+FemaleBackground <- read.xlsx("Females_HighCov_100Perm_AdjGASeqGroup_20260216/Extra/bsseq_background_annotated.xlsx")
+
+overlaps <- newGeneOverlap(na.omit(unique(MaleDMRs$geneSymbol)), na.omit(unique(FemaleDMRs$geneSymbol)), 
+                           genome.size = length(na.omit(unique(intersect(MaleBackground$geneSymbol, FemaleBackground$geneSymbol)))))
+testGeneOverlap.obj <- testGeneOverlap(overlaps)
+testGeneOverlap.obj
+print(testGeneOverlap.obj)
+
+#Males - SFARI#
+overlaps <- newGeneOverlap(na.omit(unique(MaleDMRs$geneSymbol)), na.omit(SFARIGenes), 
+                           genome.size = length(na.omit(unique(union(MaleBackground$geneSymbol, SFARIGenes)))))
+testGeneOverlap.obj <- testGeneOverlap(overlaps)
+testGeneOverlap.obj
+print(testGeneOverlap.obj)
+
+#Females - SFARI#
+overlaps <- newGeneOverlap(na.omit(unique(FemaleDMRs$geneSymbol)), na.omit(SFARIGenes), 
+                           genome.size = length(na.omit(unique(union(FemaleBackground$geneSymbol, SFARIGenes)))))
+testGeneOverlap.obj <- testGeneOverlap(overlaps)
+testGeneOverlap.obj
+print(testGeneOverlap.obj)
+
+
+#Plot with manual odds ratio definition#
+
+# ---- Define Odds Ratios ----
+OR_values <- c(
+  male_male    = NA,   # void tile
+  male_female  = 7.1,
+  male_sfari   = 1.2,
+  female_sfari = 2.7
+)
+
+# ---- Construct plotting dataframe ----
+plot_df <- data.frame(
+  Set1 = factor(c("Male DMR", "Female DMR",
+                  "Male DMR", "Female DMR"),
+                levels = c("Male DMR", "Female DMR")),
+  
+  Set2 = factor(c("Male DMR", "Male DMR",
+                  "SFARI Gene", "SFARI Gene"),
+                levels = c("Male DMR", "SFARI Gene")),
+  
+  Overlap = c(male_male, male_female,
+              male_sfari, female_sfari),
+  
+  OR = c(OR_values["male_male"],
+         OR_values["male_female"],
+         OR_values["male_sfari"],
+         OR_values["female_sfari"])
+)
+
+# Flag tiles for asterisk
+plot_df$asterisk <- ifelse(
+  (plot_df$Set1 == "Female DMR" & plot_df$Set2 == "Male DMR") |
+    (plot_df$Set1 == "Female DMR" & plot_df$Set2 == "SFARI Gene"),
+  "*", ""
+)
+
+# Separate Male–Male tile
+male_male_tile <- plot_df %>%
+  filter(Set1 == "Male DMR" & Set2 == "Male DMR")
+
+heat_tiles <- plot_df %>%
+  filter(!(Set1 == "Male DMR" & Set2 == "Male DMR"))
+
+# ---- PLOT ----
+
+p <- ggplot() +
+  
+  # Heatmap tiles (fill by Odds Ratio)
+  geom_tile(
+    data = heat_tiles,
+    aes(x = Set1, y = Set2, fill = OR),
+    color = "black"
+  ) +
+  
+  # Add overlap counts
+  geom_text(
+    data = heat_tiles,
+    aes(x = Set1, y = Set2, label = Overlap),
+    size = 5,
+    fontface = "bold"
+  ) +
+  
+  # Add asterisks
+  geom_text(
+    data = heat_tiles %>% filter(asterisk == "*"),
+    aes(x = Set1, y = Set2, label = "*"),
+    size = 8,
+    fontface = "bold",
+    vjust = -1
+  ) +
+  
+  # Male–Male void tile
+  geom_tile(
+    data = male_male_tile,
+    aes(x = Set1, y = Set2),
+    fill = NA,
+    color = "black",
+    linewidth = 1
+  ) +
+  
+  # Black X across Male–Male tile
+  geom_segment(
+    data = male_male_tile,
+    aes(x = 1 - 0.5, xend = 1 + 0.5,
+        y = 1 - 0.5, yend = 1 + 0.5),
+    inherit.aes = FALSE,
+    linewidth = 1.2
+  ) +
+  geom_segment(
+    data = male_male_tile,
+    aes(x = 1 - 0.5, xend = 1 + 0.5,
+        y = 1 + 0.5, yend = 1 - 0.5),
+    inherit.aes = FALSE,
+    linewidth = 1.2
+  ) +
+  
+  # White → Red gradient based on Odds Ratio
+  scale_fill_gradient(
+    low = "white",
+    high = "red",
+    name = "Odds Ratio",
+    na.value = "white"
+  ) +
+  
+  labs(
+    title = "Gene Set Overlap (Odds Ratio)",
+    x = NULL,
+    y = NULL
+  ) +
+  
+  coord_fixed() +
+  
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(p)
+
+#Rhesus macaque DMR gene overlap comparison#
+MacaqueDMRGenes <- read.xlsx("HongJiNasalEpithelialDMRs.xlsx")$hg38.gene.annotation
+MacaqueDMRGenes <- na.omit(unique(MacaqueDMRGenes))
+#1522 genes in the macaque nasal epithelial DMRs 
+
+#check overlap between these two gene lists#
+#Define background - all genes from filtered genelist# 
+background <- na.omit(unique(read.xlsx("AllRegionsAnnotated.xlsx")$gene_symbol))
+backgroundGenes <- strsplit(background, split = "\\|")
+backgroundGenes <- na.omit(unique(backgroundGenes))
+backgroundGenes <- backgroundGenes |>
+  unlist(use.names = FALSE) |>
+  trimws() |>
+  unique()
+backgroundGenes <- na.omit(backgroundGenes)
+#16630 background genes
+
+library(GeneOverlap)
+overlaps_MacaqueComethyl <- newGeneOverlap(gene_list, MacaqueDMRGenes, 
+                                           genome.size = 16630)
+overlaps_MacaqueComethyl
+testGeneOverlaps.obj <- testGeneOverlap(overlaps_MacaqueComethyl)
+print(testGeneOverlaps.obj)
+
+#Plot overlaps#
+#Plot Overlap#
+overlaps <- overlaps_MacaqueComethyl
+overlapsDiagram <- list(A=overlaps@listA, B=overlaps@listB)
+library(VennDiagram)
+DiagramObject <- VennDiagram::venn.diagram(overlapsDiagram, filename = 'APComethylGenesXHongJiDMRGenes.png', output = TRUE,
+                                           imagetype = "png", height = 5000, width = 5000,
+                                           fill = c("blue", "orange"),
+                                           resolution = 600, main.cex = 12, main.fontface = "bold", sub.fontface = "bold")
+
+
+
