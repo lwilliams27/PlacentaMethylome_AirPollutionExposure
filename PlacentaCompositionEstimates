@@ -1,0 +1,105 @@
+#Placenta Composition Estimates#
+
+#Load data#
+bsseq <- readRDS("Unfiltered_BSseq.rds")
+library(bsseq)
+
+# extract matrices
+M_mat   <- assay(bsseq, "M")
+Cov_mat <- assay(bsseq, "Cov")
+
+# compute β-values
+beta_mat <- M_mat / Cov_mat
+
+# handle zero-coverage CpGs
+beta_mat[Cov_mat == 0] <- NA
+
+beta_df <- as.data.frame(beta_mat)
+
+library(bsseq)
+library(GenomicRanges)
+
+# rowRanges returns GRanges
+gr <- rowRanges(bsseq)
+
+# extract components
+cpg_info <- data.frame(
+  chr   = as.character(seqnames(gr)),
+  start = start(gr),
+  end   = end(gr)
+)
+
+# optional: add CpG name / probeID if present
+if(!is.null(names(gr))) {
+  cpg_info$CpG <- names(gr)
+}
+
+head(cpg_info)
+
+# assuming beta_mat = assay(bsseq, "M") / assay(bsseq, "Cov")
+beta_df <- as.data.frame(beta_mat)
+
+# add genomic coordinates
+beta_df_full <- cbind(cpg_info, beta_df)
+head(beta_df_full)
+
+beta_df <- as.data.frame(beta_mat)
+
+# optional: add CpG coordinates as rownames if available
+row.names(beta_df_full) <- paste0(seqnames(bsseq), ":", start(bsseq))
+
+##Convert chromosome coordinates to their Ilumina Array coordinates##
+# Bioconductor package
+BiocManager::install("IlluminaHumanMethylationEPICv2anno.20a1.hg38")
+library(IlluminaHumanMethylationEPICv2anno.20a1.hg38)
+library(GenomicRanges)
+
+# Extract chromosome and position from row names
+coords <- do.call(rbind, strsplit(rownames(beta_df_full), ":"))
+chr <- coords[, 1]
+pos <- as.numeric(coords[, 2])
+
+# Create a GRanges object for WGBS CpGs
+gr_wgbs <- GRanges(seqnames = chr, ranges = IRanges(start = pos, width = 1))
+
+# Extract probe annotation as a data frame
+epic_anno <- getAnnotation(IlluminaHumanMethylationEPICv2anno.20a1.hg38)
+
+gr_epic <- GRanges(
+  seqnames = epic_anno$chr,
+  ranges   = IRanges(start = as.numeric(epic_anno$pos), width = 1),
+  probeID  = epic_anno$Name
+)
+
+# WGBS GRanges
+coords <- do.call(rbind, strsplit(rownames(beta_df_full), ":"))
+gr_wgbs <- GRanges(
+  seqnames = coords[,1],
+  ranges   = IRanges(start = as.numeric(coords[,2]), width = 1)
+)
+
+# Find overlaps
+overlaps <- findOverlaps(gr_wgbs, gr_epic)
+
+# Subset β-matrix and assign cg IDs
+wgbs_idx <- queryHits(overlaps)
+epic_idx <- subjectHits(overlaps)
+beta_epic <- beta_df[wgbs_idx, , drop = FALSE]
+rownames(beta_epic) <- gr_epic$probeID[epic_idx]
+
+head(beta_epic)
+
+beta_epic <- beta_epic[!duplicated(sub("_.*$", "", rownames(beta_epic))), ]  # keep first unique
+rownames(beta_epic) <- sub("_.*$", "", rownames(beta_epic))                # clean row names
+
+#Estimate with Minfi#
+houseman_estimates <- minfi:::projectCellType(
+  beta_epic[rownames(plCellCpGsThird), ],
+  plCellCpGsThird,
+  lessThanOne = FALSE
+)
+#Nomralize results to set sum proportions to 1#
+houseman_estimates <- sweep(houseman_estimates, 1, rowSums(houseman_estimates), FUN = "/")
+
+head(houseman_estimates)
+write.csv(houseman_estimates, file = "PlacentaCellEstimates_Minfi_PLANET.csv")
