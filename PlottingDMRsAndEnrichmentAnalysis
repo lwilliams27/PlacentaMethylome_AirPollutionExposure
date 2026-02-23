@@ -1,0 +1,238 @@
+#Plotting DMRs via Circos and Enrichment Analysis#
+
+#Circos plots#
+#Males#
+setwd("~/Desktop/Lab_Work/Schmidt_Lab/Schmidt_MARBLESBSAFE_PWFE_Project/Logan_Placenta_PWFE_analysis/DMRs_PregFireAny")
+dmr_data <- read.xlsx("Males_05Cutoff_PregFireAny_AdjGASeqGroup/DMRs/background_annotated.xlsx")
+df <- data.frame(
+  chr = dmr_data$chr,
+  start = dmr_data$start,
+  end = dmr_data$end,
+  p_value = dmr_data$p.value,
+  q_value = dmr_data$q.value,
+  methylation_status = dmr_data$direction
+)
+
+# Ensure p_value is numeric
+df$p_value <- as.numeric(as.character(df$p_value))
+
+# Define colors based on methylation status
+df$color <- ifelse(df$methylation_status == "Hypermethylated", "red",
+                   ifelse(df$methylation_status == "Hypomethylated", "blue", "gray"))
+# Adjust color for non-significant DMRs (p > 0.05)
+df$color[df$p_value > 0.05] <- "gray"
+
+# Create a new column for the y-axis values (inverted p-value for plot)
+df$y_value <- -log10(df$p_value)
+
+# Adjust the spacing between the chromosomes (gap.degree controls the angular gap between them)
+circos.par(gap.degree = 2)  # Increase the angle between chromosomes, adjust this number
+
+#Initialize ideogram#
+circos.initializeWithIdeogram(species = "hg38", 
+                              plotType = c("ideogram", "labels"),
+                              chromosome.index = c("chr1", "chr2", "chr3", "chr4", "chr5", "chr6", "chr7",
+                                                   "chr8", "chr9", "chr10", "chr11", "chr12", "chr13", "chr14",
+                                                   "chr15", "chr16", "chr17", "chr18", "chr19", "chr20", "chr21",
+                                                   "chr22", "chrX", "chrY"))
+
+# Create the inner track for p-values
+circos.trackPlotRegion(factors = df$chr, ylim = c(0, max(-log10(df$p_value), na.rm = TRUE)), 
+                       bg.border = NA, track.height = 0.68)
+
+# Add p-values as points on the inner track
+circos.trackPoints(factors = df$chr, x = (df$start + df$end) / 2,
+                   y = df$y_value, pch = 19, col = df$color, cex = 0.5)
+# Add a y-axis
+circos.yaxis(side = "left", labels.cex = 0.5)
+
+# Clear the circos plot
+circos.clear()
+
+#Females#
+dmr_data <- read.xlsx("Females_HighCov_100Perm_AdjGASeqGroup_20260216/DMRs/background_annotated.xlsx")
+df <- data.frame(
+  chr = dmr_data$chr,
+  start = dmr_data$start,
+  end = dmr_data$end,
+  p_value = dmr_data$p.value,
+  q_value = dmr_data$q.value,
+  methylation_status = dmr_data$direction
+)
+
+df <- data.frame(
+  chr = dmr_data$chr,
+  start = dmr_data$start,
+  end = dmr_data$end,
+  p_value = dmr_data$p.value,
+  q_value = dmr_data$q.value,
+  methylation_status = dmr_data$direction
+)
+
+# Ensure p_value is numeric
+df$p_value <- as.numeric(as.character(df$p_value))
+
+# Define colors based on methylation status
+df$color <- ifelse(df$methylation_status == "Hypermethylated", "red",
+                   ifelse(df$methylation_status == "Hypomethylated", "blue", "gray"))
+# Adjust color for non-significant DMRs (p > 0.05)
+df$color[df$p_value > 0.05] <- "gray"
+
+# Create a new column for the y-axis values (inverted p-value for plot)
+df$y_value <- -log10(df$p_value)
+
+# Adjust the spacing between the chromosomes (gap.degree controls the angular gap between them)
+circos.par(gap.degree = 2)  # Increase the angle between chromosomes, adjust this number
+
+#Initialize ideogram#
+circos.initializeWithIdeogram(species = "hg38", 
+                              plotType = c("ideogram", "labels"),
+                              chromosome.index = c("chr1", "chr2", "chr3", "chr4", "chr5", "chr6", "chr7",
+                                                   "chr8", "chr9", "chr10", "chr11", "chr12", "chr13", "chr14",
+                                                   "chr15", "chr16", "chr17", "chr18", "chr19", "chr20", "chr21",
+                                                   "chr22", "chrX"))
+
+# Create the inner track for p-values
+circos.trackPlotRegion(factors = df$chr, ylim = c(0, max(-log10(df$p_value), na.rm = TRUE)), 
+                       bg.border = NA, track.height = 0.68)
+
+# Add p-values as points on the inner track
+circos.trackPoints(factors = df$chr, x = (df$start + df$end) / 2,
+                   y = df$y_value, pch = 19, col = df$color, cex = 0.5)
+# Add a y-axis
+circos.yaxis(side = "left", labels.cex = 0.5)
+
+#GO Enrichment comparisons between males and females# 
+#Males#
+#Setup
+install.packages("readxl")   # if not already installed
+library(readxl)
+library(dplyr)
+
+# Path to Excel file
+file_path <- "Males_05Cutoff_PregFireAny_AdjGASeqGroup/Ontologies/GREAT_results.xlsx"
+
+# Get sheet names
+sheet_names <- excel_sheets(file_path)
+
+# Loop through sheets, filter, and combine
+combined_df <- lapply(sheet_names, function(sheet) {
+  
+  df <- read_excel(file_path, sheet = sheet)
+  
+  # Filter rows where Hyper_Adjp_BH < 0.05
+  df_filtered <- df %>%
+    filter(Hyper_Adjp_BH < 0.05) %>%
+    mutate(`Gene Ontology` = sheet)
+  
+  return(df_filtered)
+  
+}) %>%
+  bind_rows()
+
+# View result
+print(combined_df)
+
+Male_FDRSig_GO <- combined_df
+
+#Females#
+# Path to Excel file
+file_path <- "Females_HighCov_100Perm_AdjGASeqGroup_20260216/Ontologies/GREAT_results.xlsx"
+
+# Get sheet names
+sheet_names <- excel_sheets(file_path)
+
+# Loop through sheets, filter, and combine
+combined_df <- lapply(sheet_names, function(sheet) {
+  
+  df <- read_excel(file_path, sheet = sheet)
+  
+  # Filter rows where Hyper_Adjp_BH < 0.05
+  df_filtered <- df %>%
+    filter(Hyper_Adjp_BH < 0.05) %>%
+    mutate(`Gene Ontology` = sheet)
+  
+  return(df_filtered)
+  
+}) %>%
+  bind_rows()
+
+# View result
+print(combined_df)
+
+Female_FDRSig_GO <- combined_df
+
+#GO term plotting#
+
+#Male#
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(tidytext) # for reorder_within and scale_y_reordered
+library(rGREAT)
+library(biomaRt)
+
+
+Male_FDRSig_GO
+
+# ==== LOAD & CLEAN DATA ====
+enrich_df <- Male_FDRSig_GO
+
+colnames(enrich_df) <- tolower(colnames(enrich_df))
+
+# ==== FILTER TOP TERMS ====
+top_terms <- enrich_df %>%
+  group_by('gene ontology') %>%
+  arrange(hyper_adjp_bh) %>%
+  slice_head(n = 15) %>%
+  ungroup()
+
+# Wrap long term names for readability
+top_terms$name <- str_wrap(top_terms$name, width = 55)
+colnames(top_terms)[colnames(top_terms) == "gene ontology"] <- "gene_ontology"
+
+# ==== PLOT ====
+p <- ggplot(top_terms, aes(
+  x = hyper_fold_enrichment,
+  y = reorder_within(name, hyper_adjp_bh, 'gene ontology'),
+  fill = gene_ontology
+)) +
+  geom_col(width = 0.7, show.legend = FALSE) +
+  geom_text(
+    aes(
+      label = ifelse(hyper_adjp_bh < 0.05, "*", ""),
+      x = hyper_fold_enrichment + 0.05 * max(hyper_fold_enrichment)
+    ),
+    fontface = "bold",
+    size = 5.5,
+    color = "black"
+  ) +
+  scale_y_reordered() +
+  # use facet_grid to get per-panel x-axis labels
+  facet_grid(rows = vars(gene_ontology), scales = "free_y", switch = "x") +
+  scale_fill_manual(values = c(
+    "GO Biological Process" = "#FF6666",
+    "GO Molecular Function" = "#66CC99",
+    "GO Cellular Component" = "#6699FF"
+  )) +
+  labs(
+    x = "Fold Enrichment",
+    y = NULL,
+    title = "Top 15 Enriched GO Terms per Ontology",
+    subtitle = "Asterisks denote adj. p < 0.05"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.y = element_text(face = "bold", size = 10),
+    axis.text.x = element_text(size = 12),
+    plot.title = element_text(face = "bold", size = 18, hjust = 0.5),
+    plot.subtitle = element_text(size = 13, hjust = 0.5),
+    strip.text.y = element_text(face = "bold", size = 14, angle = 0),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+    strip.placement = "outside",
+    panel.spacing.y = unit(1.5, "lines"),
+    axis.title.x = element_text(size = 14, face = "bold", margin = margin(t = 10))
+  )
+
+# ==== SAVE ====
+ggsave("Top15GO_MalePRegFireAny.pdf", plot = p, width = 9, height = 16)
