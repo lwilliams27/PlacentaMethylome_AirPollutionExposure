@@ -1,0 +1,59 @@
+#Correlation Testing Regions of Hypomethylated Block#
+
+#Read individual DMR values#
+setwd("~/Desktop/Lab_Work/Schmidt_Lab/Schmidt_MARBLESBSAFE_PWFE_Project/Logan_Placenta_PWFE_analysis/DMRs_PregFireAny/Females_HighCov_100Perm_AdjGASeqGroup_20260216")
+AllDMRValues <- read.table("DMRs/DMR_individual_smoothed_methylation.txt")
+colnames(AllDMRValues) <- as.character(AllDMRValues[1,])
+AllDMRValues <- AllDMRValues[-1, ]
+
+filtered <- AllDMRValues[
+  AllDMRValues$seqnames == "chr16" &
+    AllDMRValues$start >= 7900000 &
+    AllDMRValues$end <= 8107000,
+]
+
+filteredSampleMeth <- filtered[, 17:104]
+rownames(filteredSampleMeth) <- c("16p13.2 DMR1", "16p13.2 DMR2", "16p13.2 DMR3", "16p13.2 DMR4",
+                                             "16p13.2 DMR5", "16p13.2 DMR6", "16p13.2 DMR7", "16p13.2 DMR8",
+                                             "16p13.2 DMR9", "16p13.2 DMR10", "16p13.2 DMR11", "16p13.2 DMR12",
+                                             "16p13.2 DMR13", "16p13.2 DMR14")
+
+# Transpose so DMRs become columns
+filteredSampleMeth[] <- lapply(filteredSampleMeth, as.numeric)
+dmr_cor <- cor(t(filteredSampleMeth), method = "pearson")
+
+# Inspect
+head(dmr_cor)
+
+#plot
+# Set upper triangle to NA
+dmr_cor[upper.tri(dmr_cor)] <- NA
+
+library(reshape2)
+library(ggplot2)
+
+# Melt correlation matrix
+cor_melt <- melt(dmr_cor, na.rm = FALSE)
+
+ggplot(cor_melt, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "white") +
+  geom_text(
+    aes(label = ifelse(is.na(value), "", round(value, 2))),
+    size = 3
+  ) +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    na.value = "white"
+  ) +
+  coord_fixed() +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  ) +
+  labs(x = "", y = "", fill = "Pearson Correlation (r)")
+ 
