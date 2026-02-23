@@ -1,0 +1,301 @@
+#Plotting Module Eigennodes vs. Individual Traits Within Modules#
+
+#ME~Trait Individual plot investigations
+modules <- readRDS("Modules.rds")
+MEs <- modules$MEs
+write.xlsx(MEs, "ModuleEigennodes_20260204.xlsx", rowNames = TRUE)
+#off R, merge this with the sample trait table for easy plotting.
+
+#Make a function to plot all MEs vs. traits of significance#
+plotMEtraitScatter2 <- function (ME, trait, color = "#132B43", xlim = NULL, ylim = NULL, 
+          nBreaks = 4, point.size = 2.5, axis.title.size = 20, axis.text.size = 16, 
+          xlab = "Trait", ylab = "Module Eigennode", save = TRUE, file = "ME_Trait_Scatterplot.pdf", 
+          width = 6, height = 6, verbose = TRUE) 
+{
+  if (verbose) {
+    message("[plotMEtraitScatter] Plotting module eigennode by continuous trait")
+  }
+  scatterplot <- ggplot() + geom_smooth(aes(x = trait, y = ME), 
+                                        method = "lm", formula = y ~ x, color = "#56B1F7", 
+                                        fill = "#336A98") + geom_point(aes(x = trait, y = ME), 
+                                                                       color = color, size = point.size) + coord_cartesian(xlim = xlim, 
+                                                                                                                           ylim = ylim) + scale_x_continuous(breaks = scales::breaks_pretty(n = nBreaks)) + 
+    scale_y_continuous(breaks = scales::breaks_pretty(n = nBreaks)) + 
+    theme_bw(base_size = 25) + theme(legend.position = "none", 
+                                     panel.grid.major = element_blank(), panel.border = element_rect(color = "black", 
+                                                                                                     size = 1.25), axis.ticks = element_line(size = 1.25), 
+                                     panel.grid.minor = element_blank(), strip.background = element_blank(), 
+                                     axis.text = element_text(color = "black", size = axis.text.size), 
+                                     axis.title = element_text(size = axis.title.size), plot.margin = unit(c(1, 
+                                                                                                             1, 1, 1), "lines")) + xlab(xlab) + ylab(ylab)
+  if (save) {
+    if (verbose) {
+      message("[plotMEtraitScatter] Saving plot as ", file)
+    }
+    ggsave(filename = file, plot = scatterplot, dpi = 600, 
+           width = width, height = height, units = "in")
+  }
+  return(scatterplot)
+}
+
+library(dplyr)
+# Define binary trait color codes
+trait_colors <- list(
+  Diagnosis_ASD = c("TD" = "orange", "ASD" = "purple"),
+  Sex = c("Female" = "red", "Male" = "blue"),
+  PregFire_Any = c("Control" = "green", "Exposed" = "darkgrey"),
+  Project = c("MARBLES" = "blue", "B-SAFE" = "red"),
+  Sequencing_Platform = c("Illumina HiSeq X" = "blue", "Illumina NovaSeq 6000" = "red"),
+  Sequencing_Group = c("Discovery" = "blue", "Replication" = "red", "Expansion" = "purple"),
+  MomEdu = c("No High School Degree" = "blue", "High School Diploma/GED" = "red", "Some College, No Degree" = "purple",
+             "Associate's Degree or Technical Training" = "green", "Bachelor's Degree" = "orange", "Professioanl Degree" = "black"),
+  MomHisp = c("Hispanic" = "blue", "Non-Hispanic" = "red"),
+  MomRace = c("Non-White" = "blue", "White" = "red"),
+  HomeOwn = c("Home Owner" = "blue", "Non-Home Owner" = "red")
+)
+
+# Define trait codes
+trait_codes <- list(
+  Diagnosis_ASD = c("TD" = 0, "ASD" = 1),
+  Sex = c("Female" = 0, "Male" = 1),
+  PregFire_Any = c("Control" = 0, "Exposed" = 1),
+  Project = c("MARBLES" = 1, "B-SAFE" = 0),
+  Sequencing_Platform = c("Illumina HiSeq X" = 0, "Illumina NovaSeq 6000" = 1),
+  Sequencing_Group = c("Discovery" = 0, "Replication" = 1, "Expansion" = 2),
+  MomEdu = c("No High School Degree" = 1, "High School Diploma/GED" = 2, "Some College, No Degree" = 3,
+             "Associate's Degree or Technical Training" = 4, "Bachelor's Degree" = 5, "Professioanl Degree" = 6),
+  MomHisp = c("Hispanic" = 1, "Non-Hispanic" = 0),
+  MomRace = c("Non-White" = 0, "White" = 1),
+  HomeOwn = c("Home Owner" = 1, "Non-Home Owner" = 0)
+)
+
+colData <- read.xlsx("sample_info.xlsx", rowNames = TRUE)
+categorical_traits <- c("Diagnosis_ASD", "Sex", "PregFire_Any")
+MEs <- modules$MEs
+MEs <- MEs[rownames(MEs) %in% rownames(colData), ]
+
+#loop it over everything to get all output properly#
+
+#Establish module groups again#
+#Define variables of interest#
+MEtraitCor <- read.table("ME_Trait_Bicor_Correlation_Stats.txt", header = TRUE)
+corrs <- MEtraitCor
+df <- corrs
+AP_traits <- c("PM25", "WF", "NonWF")
+ND_traits <- c("Diagnosis", "MSL", "ADOS", "CBCL")
+
+# --- tag traits ---
+df$list_type <- ifelse(grepl(paste0("^(", paste(AP_traits, collapse="|"), ")"), df$trait), "A",
+                       ifelse(grepl(paste0("^(", paste(ND_traits, collapse="|"), ")"), df$trait), "B", NA))
+
+# --- keep only significant associations ---
+sig_df <- df[df$p < 0.05, ]
+
+library(dplyr)
+
+# --- summarize significance per module ---
+module_summary <- sig_df %>%
+  group_by(module) %>%
+  summarise(
+    has_A = any(list_type == "A"),
+    has_B = any(list_type == "B")
+  )
+
+# --- ensure all modules (including those with no sig. associations) are represented ---
+all_modules <- unique(df$module)
+module_summary <- full_join(
+  data.frame(module = all_modules),
+  module_summary,
+  by = "module"
+) %>%
+  mutate(
+    has_A = ifelse(is.na(has_A), FALSE, has_A),
+    has_B = ifelse(is.na(has_B), FALSE, has_B)
+  )
+
+# --- identify modules in each category ---
+ND_only_modules <- module_summary$module[module_summary$has_B & !module_summary$has_A]
+AP_only_modules <- module_summary$module[module_summary$has_A & !module_summary$has_B]
+Both_modules <- module_summary$module[module_summary$has_A & module_summary$has_B]
+Neither_modules <- module_summary$module[!module_summary$has_A & !module_summary$has_B]
+
+# Loop through each module
+for (mod in Both_modules) {
+  # Compute dynamic Y-axis range for this module
+  y_values <- MEs[[mod]]
+  y_min <- min(y_values, na.rm = TRUE)
+  y_max <- max(y_values, na.rm = TRUE)
+  y_range <- y_max - y_min
+  y_margin <- 0.1 * y_range  # add 10% padding
+  y_limits <- c(y_min - y_margin, y_max + y_margin)
+  
+  # Find significant traits for this module
+  sig_traits <- MEtraitCor %>%
+    filter(module == mod, p < 0.05) %>%
+    pull(trait)
+  
+  # Loop through each trait
+  for (trait in sig_traits) {
+    y_data <- MEs[[mod]]
+    x_data <- colData[[trait]]
+    
+    if (trait %in% categorical_traits) {
+      # Use boxplot for categorical traits
+      comethyl::plotMEtraitDot(
+        MEs[[mod]],
+        trait = x_data,
+        traitCode = trait_codes[[trait]],
+        colors = trait_colors[[trait]],
+        ylim = y_limits,
+        xlab = trait,
+        ylab = paste(mod, "Module Eigengene"),
+        file = paste0(mod, "_ME_", trait, "_Boxplot.pdf")
+      )
+    } else {
+      # Use scatter plot for continuous traits
+      plotMEtraitScatter2(
+        MEs[[mod]],
+        trait = x_data,
+        ylim = y_limits,
+        xlab = trait,
+        ylab = paste(mod, "Module Eigengene"),
+        file = paste0(mod, "_ME_", trait, "_Scatterplot.pdf")
+      )
+    }
+  }
+}
+
+for (mod in Neither_modules) {
+  # Compute dynamic Y-axis range for this module
+  y_values <- MEs[[mod]]
+  y_min <- min(y_values, na.rm = TRUE)
+  y_max <- max(y_values, na.rm = TRUE)
+  y_range <- y_max - y_min
+  y_margin <- 0.1 * y_range  # add 10% padding
+  y_limits <- c(y_min - y_margin, y_max + y_margin)
+  
+  # Find significant traits for this module
+  sig_traits <- MEtraitCor %>%
+    filter(module == mod, p < 0.05) %>%
+    pull(trait)
+  
+  # Loop through each trait
+  for (trait in sig_traits) {
+    y_data <- MEs[[mod]]
+    x_data <- colData[[trait]]
+    
+    if (trait %in% categorical_traits) {
+      # Use boxplot for categorical traits
+      comethyl::plotMEtraitDot(
+        MEs[[mod]],
+        trait = x_data,
+        traitCode = trait_codes[[trait]],
+        colors = trait_colors[[trait]],
+        ylim = y_limits,
+        xlab = trait,
+        ylab = paste(mod, "Module Eigengene"),
+        file = paste0(mod, "_ME_", trait, "_Boxplot.pdf")
+      )
+    } else {
+      # Use scatter plot for continuous traits
+      plotMEtraitScatter2(
+        MEs[[mod]],
+        trait = x_data,
+        ylim = y_limits,
+        xlab = trait,
+        ylab = paste(mod, "Module Eigengene"),
+        file = paste0(mod, "_ME_", trait, "_Scatterplot.pdf")
+      )
+    }
+  }
+}
+
+for (mod in AP_only_modules) {
+  # Compute dynamic Y-axis range for this module
+  y_values <- MEs[[mod]]
+  y_min <- min(y_values, na.rm = TRUE)
+  y_max <- max(y_values, na.rm = TRUE)
+  y_range <- y_max - y_min
+  y_margin <- 0.1 * y_range  # add 10% padding
+  y_limits <- c(y_min - y_margin, y_max + y_margin)
+  
+  # Find significant traits for this module
+  sig_traits <- MEtraitCor %>%
+    filter(module == mod, p < 0.05) %>%
+    pull(trait)
+  
+  # Loop through each trait
+  for (trait in sig_traits) {
+    y_data <- MEs[[mod]]
+    x_data <- colData[[trait]]
+    
+    if (trait %in% categorical_traits) {
+      # Use boxplot for categorical traits
+      comethyl::plotMEtraitDot(
+        MEs[[mod]],
+        trait = x_data,
+        traitCode = trait_codes[[trait]],
+        colors = trait_colors[[trait]],
+        ylim = y_limits,
+        xlab = trait,
+        ylab = paste(mod, "Module Eigengene"),
+        file = paste0(mod, "_ME_", trait, "_Boxplot.pdf")
+      )
+    } else {
+      # Use scatter plot for continuous traits
+      plotMEtraitScatter2(
+        MEs[[mod]],
+        trait = x_data,
+        ylim = y_limits,
+        xlab = trait,
+        ylab = paste(mod, "Module Eigengene"),
+        file = paste0(mod, "_ME_", trait, "_Scatterplot.pdf")
+      )
+    }
+  }
+}
+
+for (mod in ND_only_modules) {
+  # Compute dynamic Y-axis range for this module
+  y_values <- MEs[[mod]]
+  y_min <- min(y_values, na.rm = TRUE)
+  y_max <- max(y_values, na.rm = TRUE)
+  y_range <- y_max - y_min
+  y_margin <- 0.1 * y_range  # add 10% padding
+  y_limits <- c(y_min - y_margin, y_max + y_margin)
+  
+  # Find significant traits for this module
+  sig_traits <- MEtraitCor %>%
+    filter(module == mod, p < 0.05) %>%
+    pull(trait)
+  
+  # Loop through each trait
+  for (trait in sig_traits) {
+    y_data <- MEs[[mod]]
+    x_data <- colData[[trait]]
+    
+    if (trait %in% categorical_traits) {
+      # Use boxplot for categorical traits
+      comethyl::plotMEtraitDot(
+        MEs[[mod]],
+        trait = x_data,
+        traitCode = trait_codes[[trait]],
+        colors = trait_colors[[trait]],
+        ylim = y_limits,
+        xlab = trait,
+        ylab = paste(mod, "Module Eigengene"),
+        file = paste0(mod, "_ME_", trait, "_Boxplot.pdf")
+      )
+    } else {
+      # Use scatter plot for continuous traits
+      plotMEtraitScatter(
+        MEs[[mod]],
+        trait = x_data,
+        ylim = y_limits,
+        xlab = trait,
+        ylab = paste(mod, "Module Eigengene"),
+        file = paste0(mod, "_ME_", trait, "_Scatterplot.pdf")
+      )
+    }
+  }
+}
