@@ -128,3 +128,21 @@ plotSoftPower(sft_bicor, file = "Soft_Power_Bicor_Plots.pdf")
 modules <- getModules(methAdj, power = sft$powerEstimate, regions = regions, corType = "pearson", file = "Modules.rds", nThreads = 50)
 plotRegionDendro(modules, file = "Region_Dendrograms.pdf")
 BED <- getModuleBED(modules$regions, file = "Modules.bed")
+
+#Bicor correlation between module eigennodes and traits#
+MEs <- modules$MEs
+MEtraitCor_Bicor <- getMEtraitCor(MEs, colData = colData, corType = "bicor",
+                                  file = "ME_Trait_Bicor_Correlation_Stats.txt")
+traitDendroBicor <- getCor(MEs, y = colData, corType = "bicor", robustY = FALSE) %>%
+  getDendro(transpose = TRUE)
+plotDendro(traitDendroBicor, labelSize = 3.5, expandY = c(0.65, 0.08),
+           file = "Trait_Bicor_Dendrogram.pdf")
+plotMEtraitCor(MEtraitCor_Bicor, moduleOrder = moduleDendro$order,
+               traitOrder = traitDendroBicor$order,
+               file = "ME_Trait_BicorCorrelation_Heatmap.pdf")
+plotMEtraitCor(MEtraitCor_Bicor, moduleOrder = moduleDendro$order,
+               traitOrder = traitDendroBicor$order, topOnly = TRUE, label.type = "p",
+               label.size = 4, label.nudge_y = 0, legend.position = c(1.11, 0.795),
+               colColorMargins = c(-1, 4.75, 0.5, 10.1),
+               file = "Top_ME_Trait_Bicor_Correlation_Heatmap.pdf", width = 8.5,
+               height = 4.25)
