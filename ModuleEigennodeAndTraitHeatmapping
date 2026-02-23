@@ -1,0 +1,615 @@
+#Module v. Trait Plotting#
+
+#Read in data#
+df <- read.table("ME_Trait_Bicor_Correlation_Stats.txt", header = TRUE)
+
+#Confirm group ordering identity#
+#Define variables of interest#
+AP_traits <- c("PM25", "WF", "NonWF", "PregFire_Any")
+ND_traits <- c("Diagnosis", "MSL", "ADOS", "CBCL")
+
+# --- tag traits ---
+df$list_type <- ifelse(grepl(paste0("^(", paste(AP_traits, collapse="|"), ")"), df$trait), "A",
+                       ifelse(grepl(paste0("^(", paste(ND_traits, collapse="|"), ")"), df$trait), "B", NA))
+
+# --- keep only significant associations ---
+sig_df <- df[df$p < 0.05, ]
+
+library(dplyr)
+
+# --- summarize significance per module ---
+module_summary <- sig_df %>%
+  group_by(module) %>%
+  summarise(
+    has_A = any(list_type == "A"),
+    has_B = any(list_type == "B")
+  )
+
+# --- ensure all modules (including those with no sig. associations) are represented ---
+all_modules <- unique(df$module)
+module_summary <- full_join(
+  data.frame(module = all_modules),
+  module_summary,
+  by = "module"
+) %>%
+  mutate(
+    has_A = ifelse(is.na(has_A), FALSE, has_A),
+    has_B = ifelse(is.na(has_B), FALSE, has_B)
+  )
+
+# --- identify modules in each category ---
+ND_only_modules <- module_summary$module[module_summary$has_B & !module_summary$has_A]
+AP_only_modules <- module_summary$module[module_summary$has_A & !module_summary$has_B]
+Both_modules    <- module_summary$module[module_summary$has_A & module_summary$has_B]
+Neither_modules <- module_summary$module[!module_summary$has_A & !module_summary$has_B]
+
+# --- count categories ---
+count_ND_only <- length(ND_only_modules)
+count_AP_only <- length(AP_only_modules)
+count_both    <- length(Both_modules)
+count_neither <- length(Neither_modules)
+
+# --- print results ---
+cat("Modules significantly associated with ND only: ", count_ND_only, "\n")
+print(ND_only_modules)
+cat("\nModules significantly associated with AP only: ", count_AP_only, "\n")
+print(AP_only_modules)
+cat("\nModules significantly associated with both ND and AP: ", count_both, "\n")
+print(Both_modules)
+cat("\nModules with no significant association to ND or AP: ", count_neither, "\n")
+print(Neither_modules)
+
+#Specify Module and trait orders#
+module_order <- c(Both_modules, ND_only_modules, AP_only_modules, Neither_modules)
+#trait order is exposures, then outcomes, then birth factors, then technical variables, then demographics 
+trait_order <- c(
+  "PM25MASS_avg_prec", "WF_PM25_avg_prec", "NonWF_PM25_avg_prec", "PM25Tracer5_avg_prec", "PM25Tracer10_avg_prec", "PM25MASS_avg_preg", "WF_PM25_avg_preg", "NonWF_PM25_avg_preg", "PM25Tracer5_avg_preg", "PM25Tracer10_avg_preg", "PregFire_Any",
+  "Diagnosis_ASD", "ADOS_CS", "MSLelcStandard", "CBCLexterTscore", "CBCLinterTscore", "CBCLaggrbTscore", "CBCLanxdpTscore", "CBCLattenTscore", "CBCLemotrTscore", "CBCLsleepTscore", "CBCLsomatTscore", "CBCLwithdTscore",
+  "Birthweight", "GA_deliv_wks", "Mat_BMI_PrePreg", "Sex", 
+  "Endothelial", "Hofbauer", "nRBC", "Stromal", "Syncytiotrophoblast", "Trophoblasts", "Project", "Sequencing_Group", "Sequencing_Platform", 
+  "HomeOwn", "MomAgeYr", "MomEdu", "MomHisp", "MomRace"
+)
+
+#load libraries#
+library(ggplot2)
+library(dplyr)
+library(forcats)
+
+#prep data for ordered plotting#
+plot_df <- df %>%
+  mutate(
+    module = factor(module, levels = module_order),
+    trait  = factor(trait,  levels = trait_order),
+    sig    = ifelse(p < 0.05, "*", "")
+  )
+
+module_colors <- module_order
+library(ggnewscale)
+
+#Heatmap call#
+ggplot(plot_df, aes(x = module, y = trait)) +
+  
+  ## heatmap tiles
+  geom_tile(aes(fill = cor)) +
+  
+  ## significance stars
+  geom_text(aes(label = sig), color = "black", size = 4, fontface = "bold") +
+  
+  ## correlation scale
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Bicor"
+  ) +
+  
+  ## NEW SCALE for module color strip
+  ggnewscale::new_scale_fill() +
+  
+  ## module color strip (single-row tiles)
+  geom_tile(
+    data = distinct(plot_df, module),
+    aes(
+      x = module,
+      y = 0,
+      fill = module
+    ),
+    inherit.aes = FALSE,
+    height = 0.9
+  ) +
+  
+  ## module colors
+  scale_fill_manual(
+    values = module_colors,
+    guide = "none"
+  ) +
+  
+  #expansion of axes (hopefuly) 
+  scale_x_discrete(expand = expansion(mult = 0.01)) + 
+  scale_y_discrete(expand = expansion(mult = 0.01)) +
+  
+  ## theme
+  theme_minimal(base_size = 12) +
+  theme(
+    ## axis text now sits on top of colored strip
+    axis.text.x = element_text(
+      angle = 270,
+      hjust = 0,
+      vjust = 0,
+      face = "bold"
+    ),
+    axis.text.y = element_text(face = "bold"),
+    
+    axis.ticks = element_line(color = "black", linewidth = 0.4),
+    axis.ticks.length = unit(4, "pt"),
+    
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 0.8
+    ),
+    
+    legend.position = "right",
+    legend.box.margin = margin(0, 10, 0, 10),
+    plot.margin = margin(10, 40, 40, 10)
+  )
+
+ggsave(
+  "AllModuleVsAllTraitHeatmap.pdf",
+  width = 12,
+  height = 6,
+  device = cairo_pdf
+)
+
+
+#Get Corr Data for Module vs. Module 
+ModVMod <- getCor(MEs, MEs, corType = "bicor", robustY = FALSE)
+ModVMod_lower <- ModVMod
+ModVMod_lower[upper.tri(ModVMod_lower, diag = TRUE)] <- NA
+write.xlsx(ModVMod_lower, file = "ModuleToModuleBicorStats.xlsx", rowNames = TRUE)
+#check max values#
+check <- na.omit(ModVMod_lower)
+#check Dendro with Bicor just to be safe#
+BicorDendro <- getDendro(ModVMod, distance = "bicor")
+plotDendro(BicorDendro, file = "ModuleVModuleBicorDendro.pdf")
+
+#Calculate adj.p values of the correlation
+Pvals <- corPvalueStudent(ModVMod, nSamples)
+diag(Pvals) <- NA
+
+#Recreate heatmap for each combination of module ~ trait pairs#
+#ND_only#
+module_order <- c(Both_modules, ND_only_modules, AP_only_modules, Neither_modules)
+trait_order <- c(
+  "PM25MASS_avg_prec", "WF_PM25_avg_prec", "NonWF_PM25_avg_prec", "PM25Tracer5_avg_prec", "PM25Tracer10_avg_prec", "PM25MASS_avg_preg", "WF_PM25_avg_preg", "NonWF_PM25_avg_preg", "PM25Tracer5_avg_preg", "PM25Tracer10_avg_preg", "PregFire_Any",
+  "Diagnosis_ASD", "ADOS_CS", "MSLelcStandard", "CBCLexterTscore", "CBCLinterTscore", "CBCLaggrbTscore", "CBCLanxdpTscore", "CBCLattenTscore", "CBCLemotrTscore", "CBCLsleepTscore", "CBCLsomatTscore", "CBCLwithdTscore",
+  "Birthweight", "GA_deliv_wks", "Mat_BMI_PrePreg", "Sex", 
+  "Endothelial", "Hofbauer", "nRBC", "Stromal", "Syncytiotrophoblast", "Trophoblasts", "Project", "Sequencing_Group", "Sequencing_Platform", 
+  "HomeOwn", "MomAgeYr", "MomEdu", "MomHisp", "MomRace"
+)
+
+#load libraries#
+library(ggplot2)
+library(dplyr)
+library(forcats)
+
+#prep data for ordered plotting#
+modules_to_keep <- df %>%
+  group_by(module) %>%
+  summarise(
+    sig_B = any(p < 0.05 & list_type == "B", na.rm = TRUE),
+    sig_A = any(p < 0.05 & list_type == "A", na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(sig_B & !sig_A) %>%
+  pull(module)
+
+df_filtered <- df %>%
+  filter(module %in% modules_to_keep)
+
+module_order <- ND_only_modules
+module_colors <- module_order
+
+plot_df <- df_filtered %>%
+  mutate(
+    module = factor(module, levels = module_order),
+    trait  = factor(trait,  levels = trait_order),
+    sig    = ifelse(p < 0.05, "*", "")
+  )
+
+
+module_order <- ND_only_modules
+module_colors <- module_order
+
+#Heatmap call#
+ggplot(plot_df, aes(x = module, y = trait)) +
+  
+  ## heatmap tiles
+  geom_tile(aes(fill = cor)) +
+  
+  ## significance stars
+  geom_text(aes(label = sig), color = "black", size = 4, fontface = "bold") +
+  
+  ## correlation scale
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Bicor"
+  ) +
+  
+  ## NEW SCALE for module color strip
+  ggnewscale::new_scale_fill() +
+  
+  ## module color strip (single-row tiles)
+  geom_tile(
+    data = distinct(plot_df, module),
+    aes(
+      x = module,
+      y = 0,
+      fill = module
+    ),
+    inherit.aes = FALSE,
+    height = 0.9
+  ) +
+  
+  ## module colors
+  scale_fill_manual(
+    values = module_colors,
+    guide = "none"
+  ) +
+  
+  #expansion of axes 
+  scale_x_discrete(expand = expansion(mult = 0.01)) + 
+  scale_y_discrete(expand = expansion(mult = 0.01)) +
+  
+  ## theme
+  theme_minimal(base_size = 12) +
+  theme(
+    ## axis text now sits on top of colored strip
+    axis.text.x = element_text(
+      angle = 270,
+      hjust = 0,
+      vjust = 0,
+      face = "bold"
+    ),
+    axis.text.y = element_text(face = "bold"),
+    
+    axis.ticks = element_line(color = "black", linewidth = 0.4),
+    axis.ticks.length = unit(4, "pt"),
+    
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 0.8
+    ),
+    
+    legend.position = "right",
+    legend.box.margin = margin(0, 10, 0, 10),
+    plot.margin = margin(10, 40, 40, 10)
+  )
+
+ggsave(
+  "AllModuleVsNDSigTraitHeatmap.pdf",
+  width = 12,
+  height = 9,
+  device = cairo_pdf
+)
+
+#AP only#
+modules_to_keep <- df %>%
+  group_by(module) %>%
+  summarise(
+    sig_B = any(p < 0.05 & list_type == "B", na.rm = TRUE),
+    sig_A = any(p < 0.05 & list_type == "A", na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(!sig_B & sig_A) %>%
+  pull(module)
+
+df_filtered <- df %>%
+  filter(module %in% modules_to_keep)
+
+module_order <- AP_only_modules
+module_colors <- module_order
+
+plot_df <- df_filtered %>%
+  mutate(
+    module = factor(module, levels = module_order),
+    trait  = factor(trait,  levels = trait_order),
+    sig    = ifelse(p < 0.05, "*", "")
+  )
+
+module_order <- AP_only_modules
+module_colors <- module_order
+
+ggplot(plot_df, aes(x = module, y = trait)) +
+  
+  ## heatmap tiles
+  geom_tile(aes(fill = cor)) +
+  
+  ## significance stars
+  geom_text(aes(label = sig), color = "black", size = 4, fontface = "bold") +
+  
+  ## correlation scale
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Bicor"
+  ) +
+  
+  ## NEW SCALE for module color strip
+  ggnewscale::new_scale_fill() +
+  
+  ## module color strip (single-row tiles)
+  geom_tile(
+    data = distinct(plot_df, module),
+    aes(
+      x = module,
+      y = 0,
+      fill = module
+    ),
+    inherit.aes = FALSE,
+    height = 0.9
+  ) +
+  
+  ## module colors
+  scale_fill_manual(
+    values = module_colors,
+    guide = "none"
+  ) +
+  
+  #expansion of axes
+  scale_x_discrete(expand = expansion(mult = 0.01)) + 
+  scale_y_discrete(expand = expansion(mult = 0.01)) +
+  
+  ## theme
+  theme_minimal(base_size = 12) +
+  theme(
+    ## axis text now sits on top of colored strip
+    axis.text.x = element_text(
+      angle = 270,
+      hjust = 0,
+      vjust = 0,
+      face = "bold"
+    ),
+    axis.text.y = element_text(face = "bold"),
+    
+    axis.ticks = element_line(color = "black", linewidth = 0.4),
+    axis.ticks.length = unit(4, "pt"),
+    
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 0.8
+    ),
+    
+    legend.position = "right",
+    legend.box.margin = margin(0, 10, 0, 10),
+    plot.margin = margin(10, 40, 40, 10)
+  )
+
+ggsave(
+  "AllModuleVsAPSigTraitHeatmap.pdf",
+  width = 12,
+  height = 9,
+  device = cairo_pdf
+)
+
+
+#AP AND ND MODULES
+modules_to_keep <- df %>%
+  group_by(module) %>%
+  summarise(
+    sig_A = any(p < 0.05 & list_type == "A", na.rm = TRUE),
+    sig_B = any(p < 0.05 & list_type == "B", na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(sig_A & sig_B) %>%
+  pull(module)
+
+df_filtered <- df %>%
+  filter(module %in% modules_to_keep)
+
+module_order <- Both_modules
+module_colors <- module_order
+
+plot_df <- df_filtered %>%
+  mutate(
+    module = factor(module, levels = module_order),
+    trait  = factor(trait,  levels = trait_order),
+    sig    = ifelse(p < 0.05, "*", "")
+  )
+
+ggplot(plot_df, aes(x = module, y = trait)) +
+  
+  ## heatmap tiles
+  geom_tile(aes(fill = cor)) +
+  
+  ## significance stars
+  geom_text(aes(label = sig), color = "black", size = 4, fontface = "bold") +
+  
+  ## correlation scale
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Bicor"
+  ) +
+  
+  ## NEW SCALE for module color strip
+  ggnewscale::new_scale_fill() +
+  
+  ## module color strip (single-row tiles)
+  geom_tile(
+    data = distinct(plot_df, module),
+    aes(
+      x = module,
+      y = 0,
+      fill = module
+    ),
+    inherit.aes = FALSE,
+    height = 0.9
+  ) +
+  
+  ## module colors
+  scale_fill_manual(
+    values = module_colors,
+    guide = "none"
+  ) +
+  
+  #expansion of axes
+  scale_x_discrete(expand = expansion(mult = 0.01)) + 
+  scale_y_discrete(expand = expansion(mult = 0.01)) +
+  
+  ## theme
+  theme_minimal(base_size = 12) +
+  theme(
+    ## axis text now sits on top of colored strip
+    axis.text.x = element_text(
+      angle = 270,
+      hjust = 0,
+      vjust = 0,
+      face = "bold"
+    ),
+    axis.text.y = element_text(face = "bold"),
+    
+    axis.ticks = element_line(color = "black", linewidth = 0.4),
+    axis.ticks.length = unit(4, "pt"),
+    
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 0.8
+    ),
+    
+    legend.position = "right",
+    legend.box.margin = margin(0, 10, 0, 10),
+    plot.margin = margin(10, 40, 40, 10)
+  )
+
+ggsave(
+  "AllModuleVsBothSigTraitHeatmap.pdf",
+  width = 12,
+  height = 9,
+  device = cairo_pdf
+)
+
+#Remaining modules#
+modules_to_keep <- df %>%
+  group_by(module) %>%
+  summarise(
+    sig_A = any(p < 0.05 & list_type == "A", na.rm = TRUE),
+    sig_B = any(p < 0.05 & list_type == "B", na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(!sig_A & !sig_B) %>%
+  pull(module)
+
+df_filtered <- df %>%
+  filter(module %in% modules_to_keep)
+
+module_order <- Neither_modules
+module_colors <- module_order
+
+plot_df <- df_filtered %>%
+  mutate(
+    module = factor(module, levels = module_order),
+    trait  = factor(trait,  levels = trait_order),
+    sig    = ifelse(p < 0.05, "*", "")
+  )
+
+ggplot(plot_df, aes(x = module, y = trait)) +
+  
+  ## heatmap tiles
+  geom_tile(aes(fill = cor)) +
+  
+  ## significance stars
+  geom_text(aes(label = sig), color = "black", size = 4, fontface = "bold") +
+  
+  ## correlation scale
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Bicor"
+  ) +
+  
+  ## NEW SCALE for module color strip
+  ggnewscale::new_scale_fill() +
+  
+  ## module color strip (single-row tiles)
+  geom_tile(
+    data = distinct(plot_df, module),
+    aes(
+      x = module,
+      y = 0,
+      fill = module
+    ),
+    inherit.aes = FALSE,
+    height = 0.9
+  ) +
+  
+  ## module colors
+  scale_fill_manual(
+    values = module_colors,
+    guide = "none"
+  ) +
+  
+  #expansion of axes 
+  scale_x_discrete(expand = expansion(mult = 0.01)) + 
+  scale_y_discrete(expand = expansion(mult = 0.01)) +
+  
+  ## theme
+  theme_minimal(base_size = 12) +
+  theme(
+    ## axis text now sits on top of colored strip
+    axis.text.x = element_text(
+      angle = 270,
+      hjust = 0,
+      vjust = 0,
+      face = "bold"
+    ),
+    axis.text.y = element_text(face = "bold"),
+    
+    axis.ticks = element_line(color = "black", linewidth = 0.4),
+    axis.ticks.length = unit(4, "pt"),
+    
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 0.8
+    ),
+    
+    legend.position = "right",
+    legend.box.margin = margin(0, 10, 0, 10),
+    plot.margin = margin(10, 40, 40, 10)
+  )
+
+ggsave(
+  "AllModuleVsNeitherSigTraitHeatmap.pdf",
+  width = 12,
+  height = 9,
+  device = cairo_pdf
+)
