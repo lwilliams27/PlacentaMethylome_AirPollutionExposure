@@ -1,0 +1,284 @@
+#Module Region GO Enrichment Analysis#
+
+#Analyze Functional Enrichments#
+library(rGREAT)
+library(GenomicRanges)
+library(GenomeInfoDb)
+library(IRanges)
+library(org.Hs.eg.db)
+
+enrichModule <- function(regions, module = NULL,
+                         genome = c("hg38"),
+                         ontologies = c("GO:BP", "GO:MF", "GO:CC"),
+                         min_region_hits = 2,
+                         pvalue_threshold = 0.05,
+                         adjMethod = c("fdr", "holm", "hochberg", "hommel",
+                                       "bonferroni", "BH", "BY", "none"),
+                         save = TRUE, file = "Module_Enrichment_Results.txt",
+                         verbose = TRUE) {
+  
+  # Match arguments
+  genome <- match.arg(genome)
+  if (genome != "hg38") stop("[enrichModule] Only hg38 supported in local version")
+  adjMethod <- match.arg(adjMethod)
+  
+  # Subset regions by module
+  if (!is.null(module)) {
+    if (verbose) message("[enrichModule] Analyzing regions in module: ", module)
+    moduleRegions <- regions[regions$module %in% module, ]
+  } else {
+    if (verbose) message("[enrichModule] Analyzing all non-'grey' modules")
+    moduleRegions <- regions[regions$module != "grey", ]
+  }
+  
+  # Clean GRanges
+  fixGR <- function(gr) {
+    gr <- gr[!is.na(start(gr)) & !is.na(end(gr)) & width(gr) > 0]
+    gr <- GenomeInfoDb::keepStandardChromosomes(gr, pruning.mode = "coarse")
+    GenomeInfoDb::seqlevelsStyle(gr) <- "UCSC"
+    gr
+  }
+  
+  # Build GRanges object
+  gr <- with(moduleRegions, GenomicRanges::GRanges(chr, IRanges::IRanges(start, end = end)))
+  gr <- fixGR(gr)
+  
+  # Check for minimum region count
+  if (length(gr) < min_region_hits) {
+    warning("[enrichModule] Too few regions (", length(gr), ") for enrichment")
+    return(NULL)
+  }
+  
+  # Run local GREAT
+  if (verbose) message("[enrichModule] Running local GREAT via rGREAT")
+  job <- rGREAT::great(gr, ontologies, genome)
+  results <- rGREAT::getEnrichmentTable(job)
+  
+  # Check for empty result
+  if (nrow(results) == 0) {
+    warning("[enrichModule] No terms passed p-value/hit filters")
+    if (save) {
+      if (verbose) message("[enrichModule] Writing empty output to ", file)
+      writeLines("No enrichment terms passed filters.", file)
+    }
+    return(NULL)
+  }
+  
+  # Post-process results
+  results$p <- results$p_value
+  results$adj_p <- stats::p.adjust(results$p, method = adjMethod)
+  results$log_p <- -log10(results$p)
+  results$log_adj_p <- -log10(results$adj_p)
+  results$term <- results$description
+  
+  # Must come AFTER p is defined and BEFORE filtering
+  if ("observed_region_hits" %in% colnames(results)) {
+    results$region_hits <- results$observed_region_hits
+  } else {
+    stop("[enrichModule] Could not find 'observed_region_hits' column")
+  }
+  
+  # Filtering
+  results <- subset(results, region_hits >= min_region_hits & p < pvalue_threshold)
+  if (nrow(results) == 0) {
+    warning("[enrichModule] No terms passed p-value/hit filters")
+    return(NULL)
+  }
+  
+  # Final selection
+  results <- results[order(results$p), ]
+  results <- results[, c("id", "term", "region_hits", "fold_enrichment", "p",
+                         "adj_p", "log_p", "log_adj_p")]
+  
+  
+  
+  # Save results
+  if (save) {
+    if (verbose) message("[enrichModule] Saving to ", file)
+    write.table(results, file = file, sep = "\t", quote = FALSE, row.names = FALSE)
+  }
+  
+  return(results)
+}
+
+run_all_GO_enrichments <- function(regions, modules, base_filename = "Module_GO_Enrichment", 
+                                   save_combined = TRUE, verbose = TRUE) {
+  # List of GO ontologies
+  go_terms <- c("GO:BP", "GO:MF", "GO:CC")
+  
+  # Store results in a list
+  results_list <- list()
+  
+  for (ont in go_terms) {
+    if (verbose) message("\n--- Running enrichment for ", ont, " ---")
+    
+    # Define output filename
+    out_file <- paste0(base_filename, "_", gsub(":", "_", ont), ".txt")
+    
+    # Run enrichModule
+    res <- tryCatch({
+      enrichModule(
+        regions,
+        module = modules,
+        ontologies = ont,
+        save = TRUE,
+        file = out_file,
+        verbose = verbose
+      )
+    }, error = function(e) {
+      message("⚠️  Enrichment failed for ", ont, ": ", e$message)
+      return(NULL)
+    })
+    
+    # Store the result (if any)
+    if (!is.null(res)) {
+      res$Ontology <- ont
+      results_list[[ont]] <- res
+    }
+  }
+  
+  # Optionally combine all results into one data frame
+  if (save_combined && length(results_list) > 0) {
+    combined <- do.call(rbind, results_list)
+    combined_file <- paste0(base_filename, "_Combined.txt")
+    write.table(combined, file = combined_file, sep = "\t", quote = FALSE, row.names = FALSE)
+    if (verbose) message("\n✅ Combined results saved to: ", combined_file)
+    return(combined)
+  } else if (length(results_list) > 0) {
+    return(results_list)
+  } else {
+    message("⚠️ No successful enrichments were returned.")
+    return(NULL)
+  }
+}
+
+combined_results <- run_all_GO_enrichments(
+  regions = regions,
+  modules = AP_only_modules,
+  base_filename = "SigWithAPModulesOnly",
+  save_combined = TRUE,
+  verbose = TRUE
+)
+
+combined_results_ND <- run_all_GO_enrichments(
+  regions = regions,
+  modules = ND_only_modules,
+  base_filename = "SigWithNDModulesOnly",
+  save_combined = TRUE,
+  verbose = TRUE
+)
+
+combined_results_both <- run_all_GO_enrichments(
+  regions = regions,
+  modules = Both_modules,
+  base_filename = "SigWithBothModules",
+  save_combined = TRUE,
+  verbose = TRUE
+)
+
+combined_results_neither <- run_all_GO_enrichments(
+  regions = regions,
+  modules = Neither_modules,
+  base_filename = "SigWithNeitherModulesOnly",
+  save_combined = TRUE,
+  verbose = TRUE
+)
+
+#Plot all relevant GO enrichments 
+#Sig AP Only#
+# Load required packages
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(tidytext) # for reorder_within and scale_y_reordered
+library(rGREAT)
+library(biomaRt)
+
+# ==== CONFIGURATION ====
+combined_file <- "SigWithAPModulesOnly_Combined.txt"
+plot_out <- "SigWithAPModulesOnly_GO_Top15_Plot_withXlabels.pdf"
+
+# ==== LOAD & CLEAN DATA ====
+enrich_df <- read.delim(combined_file, stringsAsFactors = FALSE)
+
+colnames(enrich_df) <- tolower(colnames(enrich_df))
+
+if(!"term" %in% names(enrich_df)) {
+  names(enrich_df)[names(enrich_df) == "name"] <- "term"
+}
+if(!"adj_p" %in% names(enrich_df)) {
+  names(enrich_df)[names(enrich_df) %in% c("fdr", "adjp", "adj.p")] <- "adj_p"
+}
+if(!"fold_enrichment" %in% names(enrich_df)) {
+  names(enrich_df)[names(enrich_df) %in% c("fold.enrichment", "enrichment")] <- "fold_enrichment"
+}
+
+# ==== FILTER TOP TERMS ====
+top_terms <- enrich_df %>%
+  group_by(ontology) %>%
+  arrange(adj_p) %>%
+  slice_head(n = 15) %>%
+  ungroup()
+
+# Wrap long term names for readability
+top_terms$term <- str_wrap(top_terms$term, width = 55)
+
+# ==== PLOT ====
+p <- ggplot(top_terms, aes(
+  x = fold_enrichment,
+  y = reorder_within(term, fold_enrichment, ontology),
+  fill = ontology
+)) +
+  geom_col(width = 0.7, show.legend = FALSE) +
+  geom_text(
+    aes(
+      label = ifelse(adj_p < 0.05, "*", ""),
+      x = fold_enrichment + 0.05 * max(fold_enrichment)
+    ),
+    fontface = "bold",
+    size = 5.5,
+    color = "black"
+  ) +
+  scale_y_reordered() +
+  # use facet_grid to get per-panel x-axis labels
+  facet_grid(rows = vars(ontology), scales = "free_y", switch = "x") +
+  scale_fill_manual(values = c(
+    "GO:BP" = "#FF6666",
+    "GO:MF" = "#66CC99",
+    "GO:CC" = "#6699FF"
+  )) +
+  labs(
+    x = "Fold Enrichment",
+    y = NULL,
+    title = "Top 15 Enriched GO Terms per Ontology",
+    subtitle = "Asterisks denote adj. p < 0.05"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.y = element_text(face = "bold", size = 10),
+    axis.text.x = element_text(size = 12),
+    plot.title = element_text(face = "bold", size = 18, hjust = 0.5),
+    plot.subtitle = element_text(size = 13, hjust = 0.5),
+    strip.text.y = element_text(face = "bold", size = 14, angle = 0),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+    strip.placement = "outside",
+    panel.spacing.y = unit(1.5, "lines"),
+    axis.title.x = element_text(size = 14, face = "bold", margin = margin(t = 10))
+  )
+
+# ==== SAVE ====
+ggsave(plot_out, plot = p, width = 9, height = 16)
+message("✅ Plot saved to: ", plot_out)
+
+#ND Sig Only#
+# ==== CONFIGURATION ====
+combined_file <- "SigWithNDModulesOnly_Combined.txt"
+plot_out <- "SigWithNDModulesOnly_GO_Top15_Plot_withXlabels.pdf"
+
+#NeitherSigOnly#
+combined_file <- "SigWithNeitherModulesOnly_Combined.txt"
+plot_out <- "SigWithNeitherModulesOnly_GO_Top15_Plot_withXlabels.pdf"
+
+#BothSigOnly
+combined_file <- "SigWithBothModules_Combined.txt"
+plot_out <- "SigWithBothModulesOnly_GO_Top15_Plot_withXlabels.pdf"
